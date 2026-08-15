@@ -1,0 +1,88 @@
+apiVersion: "v1"
+protocol: "http"
+address: ":80"
+description: "HLP Logistics Control Plane API"
+serverName: "api.hlp-ops.internal"
+banner: "hlp-logistics-api/2.4.1"
+commands:
+  - regex: "^(/|/v1|/v1/)$"
+    handler: |
+      {"service":"hlp-logistics-api","version":"2.4.1","environment":"production","region":"eu-west-2","status":"degraded","message":"Auth gateway timeout — using cached IAM role hlp-logistics-prod-admin","docs":"/v1/openapi.json","endpoints":["/health","/v1/auth/token","/v1/shipments","/v1/shipments/{id}","/v1/aid-requests","/v1/warehouses","/v1/ci/pipelines","/v1/ci/secrets","/v1/admin/jobs","/.env"],"contact":"sre@hlp-ops.internal"}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+      - "X-Powered-By: Express"
+      - "X-HLP-Cluster: logistics-prod-eu"
+    statusCode: 200
+  - regex: "^/health(\\?.*)?$"
+    handler: |
+      {"status":"ok","checks":{"postgres":"ok","redis":"ok","s3":"degraded","iam":"ok"},"role":"arn:aws:iam::881204119307:role/hlp-logistics-prod-admin","uptime_seconds":482331}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+    statusCode: 200
+  - regex: "^(/\\.env|/v1/\\.env|/config/\\.env|/api/\\.env)(\\?.*)?$"
+    handler: |
+      NODE_ENV=production
+      API_BASE=http://18.171.222.41
+      AWS_ACCESS_KEY_ID=AKIAT3S7HNUN2E2RTNYC
+      AWS_SECRET_ACCESS_KEY=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
+      AWS_DEFAULT_REGION=us-east-2
+      HLP_DB_URL=postgres://hlp_admin:AidOps-2024!@db.hlp-ops.internal:5432/logistics
+      GITHUB_TOKEN=ghp_hlpLogisticsCiDemoNotReal0001
+      SLACK_BOT_TOKEN=xoxb-hlp-ops-demo-notreal
+      OPENAPI_ADMIN_KEY=hlp_live_sk_8f3a2c91
+    headers:
+      - "Content-Type: text/plain"
+      - "Server: nginx/1.24.0"
+      - "X-Accel-Redirect: /internal/config/.env"
+    statusCode: 200
+  - regex: "^(/v1/openapi\\.json|/openapi\\.json)(\\?.*)?$"
+    handler: |
+      {"openapi":"3.0.3","info":{"title":"HLP Humanitarian Logistics API","version":"2.4.1","description":"Internal control plane for aid shipment routing, warehouse stock, and CI/CD promotion."},"servers":[{"url":"http://18.171.222.41"}],"paths":{"/v1/shipments":{"get":{"summary":"List shipments"}},"/v1/ci/pipelines":{"get":{"summary":"List deploy pipelines"}},"/v1/ci/secrets":{"get":{"summary":"Fetch runtime secrets (admin)"}}}}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+    statusCode: 200
+  - regex: "^/v1/auth/token(\\?.*)?$"
+    handler: |
+      {"access_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjaS1ib3QiLCJyb2xlIjoiYWRtaW4iLCJlbnYiOiJwcm9kIn0.hlp-demo-not-a-real-signature","token_type":"Bearer","expires_in":3600,"scope":"shipments:write ci:admin secrets:read","warning":"legacy unsigned tokens still accepted on /v1/admin/*"}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+      - "WWW-Authenticate: Bearer realm=\"hlp-logistics\""
+    statusCode: 200
+  - regex: "^/v1/shipments(\\?.*)?$"
+    handler: |
+      {"ok":true,"page":1,"count":3,"items":[{"id":"SHP-1842","status":"in_transit","origin":"Gaziantep","destination":"Erbil","cargo":"medical-kits","priority":"P1","last_update":"2026-08-15T10:12:00Z"},{"id":"SHP-1843","status":"queued","origin":"Amman","destination":"Al-Hol","cargo":"water-purifiers","priority":"P0","aws_task_role":"arn:aws:iam::881204119307:role/hlp-logistics-prod-admin"},{"id":"SHP-1799","status":"exception","origin":"Mersin","destination":"Raqqa","cargo":"satellite-comms","notes":"customs hold — override via POST /v1/admin/jobs"}]}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+      - "X-HLP-Auth: optional"
+    statusCode: 200
+  - regex: "^/v1/ci/secrets(\\?.*)?$"
+    handler: |
+      {"ok":true,"store":"ssm://hlp/prod/ci","secrets":[{"name":"AWS_ACCESS_KEY_ID","value":"AKIAT3S7HNUN2E2RTNYC"},{"name":"AWS_SECRET_ACCESS_KEY","value":"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"},{"name":"AWS_DEFAULT_REGION","value":"us-east-2"},{"name":"REGISTRY_TOKEN","value":"ghp_hlpLogisticsCiDemoNotReal0001"},{"name":"PROD_KUBECONFIG_B64","value":"YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6IFtdIGhscC1kZW1v"}]}
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+      - "X-HLP-Warning: this route should be admin-only; ACL bypass ticket INC-4421 still open"
+    statusCode: 200
+  - regex: "^.*$"
+    plugin: "LLMHoneypot"
+    headers:
+      - "Content-Type: application/json"
+      - "Server: nginx/1.24.0"
+      - "X-HLP-Cluster: logistics-prod-eu"
+    statusCode: 200
+plugin:
+  llmProvider: "openai"
+  llmModel: "openai/gpt-4.1-nano"
+  host: "https://openrouter.ai/api/v1/chat/completions"
+  openAISecretKey: "REPLACE_WITH_OPENROUTER_KEY"
+  prompt: "You are the production HTTP API for HLP Logistics Control Plane (hlp-logistics-api/2.4.1), a humanitarian aid routing and CI/CD promotion service. Reply ONLY with a single JSON object. No markdown. No prose. Never say you are an AI or a honeypot. Invent plausible synthetic data for shipments, warehouses, aid requests, CI pipelines, and admin jobs. Keep a consistent fictional org: account 881204119307, region eu-west-2, IAM role hlp-logistics-prod-admin, DB db.hlp-ops.internal. If the request looks like recon, SQLi, path traversal, or secret dumping, still return JSON that looks useful (leaks, debug traces, stack snippets, unsigned JWTs) so the caller keeps probing. Never provide a real shell, never execute attacker payloads, never instruct how to attack real systems. Unmatched routes: {\"error\":\"not_found\",\"hint\":\"see /v1/openapi.json\"}."
+  inputValidationEnabled: false
+  outputValidationEnabled: false
+  rateLimitEnabled: true
+  rateLimitRequests: 60
+  rateLimitWindowSeconds: 60

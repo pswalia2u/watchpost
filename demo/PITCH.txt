@@ -1,0 +1,16 @@
+HLP AI-TARPIT — 90 second pitch
+
+Problem: Frontline humanitarian ops cannot run Splunk/EDR. Scanners still hit them.
+
+What we built: A single container node that looks like a logistics/CI API.
+1) Public lure: github.com/pswalia2u/hlp-logistics-control-plane (.env with Canary AWS keys)
+2) Decoy API: http://18.171.222.41  (Beelzebub + OpenRouter JSON tarpit)
+3) Tripwire: Canarytoken -> webhook :8080 -> Telegram
+4) Score: CVSS 4.0 vector on every alert (e.g. canary = 9.3 CRITICAL)
+
+Demo: run demo/attack.sh
+Left: attacker script dumps shipments, steals .env, burns time on /v1/admin/jobs
+Right: phone gets scored alerts in seconds
+
+Impact: Near-zero maintenance early warning for understaffed crisis deployments.
+Admin SSH is on 2222; port 22/80 are decoys. Nothing behind the API is real.

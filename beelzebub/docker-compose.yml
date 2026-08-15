@@ -1,0 +1,21 @@
+services:
+  beelzebub:
+    image: m4r10/beelzebub:latest
+    container_name: beelzebub_engine
+    restart: always
+    entrypoint: ["/main", "run"]
+    command: ["--mem-limit-mib", "512"]
+    ports:
+      - "22:22"
+      - "127.0.0.1:9080:80"
+      - "127.0.0.1:2112:2112"
+    volumes:
+      - ./configurations:/configurations
+      - ./data:/app/data
+    environment:
+      - TZ=Europe/London
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"

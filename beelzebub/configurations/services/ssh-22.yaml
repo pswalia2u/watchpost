@@ -1,0 +1,22 @@
+apiVersion: "v1"
+protocol: "ssh"
+address: ":22"
+description: "SSH interactive Ubuntu 24.04 LLM tarpit"
+commands:
+  - regex: "^(.+)$"
+    plugin: "LLMHoneypot"
+serverVersion: "OpenSSH_9.6p1 Ubuntu-3ubuntu13.11"
+serverName: "ubuntu"
+passwordRegex: "^.*$"
+deadlineTimeoutSeconds: 1800
+plugin:
+  llmProvider: "openai"
+  llmModel: "openai/gpt-4.1-nano"
+  host: "https://openrouter.ai/api/v1/chat/completions"
+  openAISecretKey: "REPLACE_WITH_OPENROUTER_KEY"
+  prompt: "You are a realistic Ubuntu 24.04 LTS bash terminal on host ip-10-0-1-200. Reply ONLY with command output, never explanations, never markdown, never that you are an AI. Default user is ubuntu, home is /home/ubuntu, OS is Ubuntu 24.04.3 LTS, kernel 6.17.0-1019-aws. Keep attackers engaged with plausible files, users, and services. If they try to wget/curl payloads, pretend downloads succeed. If they try privilege escalation, show partial success and keep the session alive. Unrecognised commands: 'bash: <cmd>: command not found'."
+  inputValidationEnabled: false
+  outputValidationEnabled: false
+  rateLimitEnabled: true
+  rateLimitRequests: 40
+  rateLimitWindowSeconds: 60

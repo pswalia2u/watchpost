@@ -1,0 +1,17 @@
+# Terraform
+iaac/.terraform/
+iaac/terraform.tfstate
+iaac/terraform.tfstate.backup
+iaac/*.tfvars
+
+# Secrets / runtime
+**/secrets/
+**/.env.local
+**/telegram.env
+beelzebub/data/
+**/__pycache__/
+*.pyc
+.DS_Store
+
+# Nested git (lure has its own public repo)
+lure/.git/

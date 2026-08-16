@@ -4,9 +4,10 @@
 
 Watchpost is a solo, one-day hackathon project. It deploys a single lightweight cloud node that *looks* like a production humanitarian logistics and CI control-plane API. Automated attackers who scrape “leaked” cloud keys or probe the API get stuck in synthetic responses; defenders get scored alerts on Telegram within seconds—with IP geolocation, public threat intel, and Tor detection.
 
-> **Live decoy API:** http://18.171.222.41  
 > **Source:** https://github.com/pswalia2u/watchpost  
-> **Public lure (intentional Canarytoken `.env`):** https://github.com/pswalia2u/hlp-logistics-control-plane
+> **Public lure (intentional Canarytoken `.env`):** https://github.com/pswalia2u/hlp-logistics-control-plane  
+> **Deploy / destroy:** GitHub Actions — see [DEPLOY.md](DEPLOY.md)  
+> **Example decoy API (prior demo node):** http://18.171.222.41
 
 Nothing behind the decoy is real. There is no real warehouse database, no real IAM in the operator’s AWS account, and no beneficiary PII.
 
@@ -66,7 +67,7 @@ I provision an AWS VM, run [Beelzebub](https://github.com/beelzebub-labs/beelzeb
                          +--> data/intel/ extracts (files, no DB)
 ```
 
-### Port map (live node `18.171.222.41`)
+### Port map
 
 | Port | Role |
 |---|---|
@@ -142,25 +143,28 @@ No SQLite/Postgres. On the VM under `/home/ubuntu/beelzebub/data/`:
 
 ## Quick demo (60 seconds)
 
+After deploy, replace `<PUBLIC_IP>` with your node (job summary prints it). Example below uses a prior demo host:
+
 ```bash
-curl -sS http://18.171.222.41/health | python3 -m json.tool
-curl -sS http://18.171.222.41/v1/shipments | python3 -m json.tool | head
-curl -sS http://18.171.222.41/.env
-curl -sS -m 20 http://18.171.222.41/v1/admin/jobs   # LLM catch-all
+API="${API:-http://18.171.222.41}"   # or http://<PUBLIC_IP> from Deploy summary
+curl -sS "$API/health" | python3 -m json.tool
+curl -sS "$API/v1/shipments" | python3 -m json.tool | head
+curl -sS "$API/.env"
+curl -sS -m 20 "$API/v1/admin/jobs"   # LLM catch-all
 ```
 
 Full assumed-breach script (recon → secrets → Canary STS → Tor probe → LLM tarpit):
 
 ```bash
-./demo/attack.sh
+API=http://<PUBLIC_IP> ./demo/attack.sh
 ```
 
-Split-screen: attacker terminal on the left, Telegram **HLP Tarpit Alerts** on the phone.
+Split-screen: attacker terminal on the left, Telegram alerts on the phone.
 
 Admin SSH (operators only):
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 -p 2222 ubuntu@18.171.222.41
+ssh -i ~/.ssh/id_ed25519 -p 2222 ubuntu@<PUBLIC_IP>
 ```
 
 ---
@@ -170,28 +174,34 @@ ssh -i ~/.ssh/id_ed25519 -p 2222 ubuntu@18.171.222.41
 ```text
 watchpost/
 ├── README.md
-├── iaac/                         # Terraform: VPC, SG, Ubuntu VM
-│   └── main.tf
+├── DEPLOY.md                     # Full deploy / destroy / secrets guide
+├── .github/workflows/
+│   ├── deploy.yml                 # Actions: Deploy Watchpost
+│   └── destroy.yml                # Actions: Destroy Watchpost
+├── iaac/                          # Terraform: VPC, SG, Ubuntu VM
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── versions.tf
+│   └── terraform.tfvars.example
+├── deploy/systemd/                # canary-webhook + tor-gateway units
+├── scripts/
+│   ├── check_prereqs.sh           # Fail-fast secret checklist
+│   └── bootstrap_node.sh          # SSH inject secrets + start stack
 ├── beelzebub/
 │   ├── docker-compose.yml         # Beelzebub on :22 and localhost:9080
 │   ├── configurations/
-│   │   ├── beelzebub.yaml        # Core logging / Prometheus
+│   │   ├── beelzebub.yaml
 │   │   └── services/
-│   │       ├── http-80.yaml      # Logistics API + LLM catch-all
-│   │       └── ssh-22.yaml       # SSH LLM decoy
+│   │       ├── http-80.yaml       # Placeholders filled at bootstrap
+│   │       └── ssh-22.yaml
 │   └── intel/
-│       ├── receiver.py          # Webhooks, CVSS, Telegram, CTI enrichment
-│       ├── tor_gateway.py        # :80 Tor gate + reverse proxy
-│       ├── extract_iocs.py      # Minute timer → data/intel/
-│       └── canary_webhook.py    # Earlier stub (superseded by receiver)
+│       ├── receiver.py           # Webhooks, CVSS, Telegram, CTI
+│       ├── tor_gateway.py
+│       └── extract_iocs.py
 ├── demo/
-│   ├── attack.sh                # Assumed-breach demo
+│   ├── attack.sh
 │   └── PITCH.txt
-└── lure/                         # Materials mirrored in the public lure repo
-    ├── .env
-    ├── .aws/credentials
-    ├── README.md
-    └── scripts/check_api.py
+└── lure/                          # Materials mirrored in the public lure repo
 ```
 
 ---
@@ -202,6 +212,7 @@ watchpost/
 |---|---|
 | Cloud | AWS EC2, VPC, Security Groups (eu-west-2) |
 | IaC | Terraform |
+| CI/CD | GitHub Actions (`deploy.yml` / `destroy.yml`) |
 | Deception | Beelzebub (`m4r10/beelzebub`) |
 | LLM | OpenRouter → `openai/gpt-4.1-nano` |
 | Tripwire | Thinkst Canarytokens (AWS keys) |
@@ -215,16 +226,62 @@ I did **not** train a custom model. The “AI” is orchestration: a deception r
 
 ---
 
-## Deploy
+## Deploy & destroy (GitHub Actions)
 
-**GitHub Actions (recommended):** see [DEPLOY.md](DEPLOY.md).
+Full walkthrough: **[DEPLOY.md](DEPLOY.md)**.
 
-1. Add required repository secrets (AWS IAM, SSH keypair, OpenRouter, Telegram, Canarytoken AWS keys).
-2. **Actions → Deploy Watchpost → Run workflow** and tick **confirm_prerequisites**.
-3. After apply, set the Canarytoken webhook to `http://<public-ip>:8080/hook/canary`.
-4. Tear down later with **Actions → Destroy Watchpost** (tick **confirm_destroy**; reuses the Terraform state artifact).
+### Required repository secrets
 
-Manual path: `terraform apply` in `iaac/`, then `./scripts/bootstrap_node.sh` with the same env vars.
+**Settings → Secrets and variables → Actions**
+
+| Secret | Purpose |
+|---|---|
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Real IAM that can create VPC + EC2 (**not** Canary keys) |
+| `SSH_PRIVATE_KEY` / `SSH_PUBLIC_KEY` | Admin SSH on port **2222** |
+| `OPENROUTER_API_KEY` | LLM tarpit (OpenRouter) |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Phone alerts |
+| `CANARY_AWS_ACCESS_KEY_ID` / `CANARY_AWS_SECRET_ACCESS_KEY` | Thinkst Canarytoken tripwire keys |
+
+### Deploy
+
+1. **Actions → Deploy Watchpost → Run workflow**
+2. Tick **confirm_prerequisites** (required — otherwise the job fails with a checklist)
+3. Optional inputs: `aws_region` (`eu-west-2`), `instance_type`, `llm_model`, `admin_cidr`, `canary_aws_region`
+4. Workflow: validate secrets → `terraform apply` → SSH bootstrap (Beelzebub + Telegram + Tor gateway) → smoke checks
+5. Job summary prints **decoy API** and **Canary webhook** URLs; Terraform state is uploaded as artifact `watchpost-terraform-state`
+
+**After deploy**
+
+1. Set the Canarytoken webhook to `http://<PUBLIC_IP>:8080/hook/canary`
+2. Align the public lure `.env` with the same Canary keys
+3. Demo: `API=http://<PUBLIC_IP> ./demo/attack.sh`
+
+### Destroy
+
+1. **Actions → Destroy Watchpost → Run workflow**
+2. Tick **confirm_destroy** (required)
+3. Use the **same** region / project / instance / CIDR as deploy
+4. Leave `deploy_run_id` empty to use the latest successful Deploy state artifact (or paste a run id)
+5. Secrets needed for destroy: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SSH_PUBLIC_KEY`
+
+Destroys the EC2 node, VPC, subnet, IGW, security group, and key pair from that state.
+
+### Manual (without Actions)
+
+```bash
+# Terraform (see iaac/terraform.tfvars.example)
+cd iaac && terraform apply
+
+# Bootstrap
+export PUBLIC_IP=...
+export SSH_KEY_FILE=~/.ssh/id_ed25519
+export OPENROUTER_API_KEY=...
+export TELEGRAM_BOT_TOKEN=...
+export TELEGRAM_CHAT_ID=...
+export CANARY_AWS_ACCESS_KEY_ID=...
+export CANARY_AWS_SECRET_ACCESS_KEY=...
+./scripts/bootstrap_node.sh
+```
 
 ---
 

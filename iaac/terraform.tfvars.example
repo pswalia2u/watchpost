@@ -1,0 +1,6 @@
+# Example: copy to terraform.tfvars (gitignored) for local applies.
+aws_region     = "eu-west-2"
+project_name   = "watchpost"
+instance_type  = "m7i-flex.large"
+ssh_public_key = "ssh-ed25519 AAAA... your-key-here"
+# admin_cidr   = "203.0.113.10/32"

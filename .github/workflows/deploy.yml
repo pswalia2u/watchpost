@@ -1,0 +1,250 @@
+name: Deploy Watchpost
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_prerequisites:
+        description: "I have created ALL required GitHub Actions secrets (AWS deploy IAM, SSH keypair, OpenRouter, Telegram bot+chat, Canarytoken AWS keys)"
+        required: true
+        type: boolean
+        default: false
+      aws_region:
+        description: "AWS region for the EC2 node"
+        required: true
+        type: string
+        default: "eu-west-2"
+      instance_type:
+        description: "EC2 instance type"
+        required: true
+        type: string
+        default: "m7i-flex.large"
+      project_name:
+        description: "Name prefix for AWS resources"
+        required: true
+        type: string
+        default: "watchpost"
+      admin_cidr:
+        description: "CIDR allowed for admin SSH :2222 (your IP/32 recommended)"
+        required: true
+        type: string
+        default: "0.0.0.0/0"
+      llm_model:
+        description: "OpenRouter model id for Beelzebub LLM tarpit"
+        required: true
+        type: string
+        default: "openai/gpt-4.1-nano"
+      canary_aws_region:
+        description: "Region embedded in decoy .env for Canary AWS keys"
+        required: true
+        type: string
+        default: "us-east-2"
+      skip_bootstrap:
+        description: "Only run Terraform (skip remote Docker/Telegram bootstrap)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watchpost-deploy
+  cancel-in-progress: false
+
+jobs:
+  prerequisites:
+    name: Check prerequisites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Confirm checklist
+        if: ${{ inputs.confirm_prerequisites != true }}
+        run: |
+          cat <<'EOF'
+          ERROR: You must tick "confirm_prerequisites" before deploying.
+
+          Before running this workflow, create these repository secrets:
+            Settings → Secrets and variables → Actions → New repository secret
+
+          ┌─────────────────────────────────────────────────────────────┐
+          │ REQUIRED SECRETS                                           │
+          ├──────────────────────────────┬────────────────────────────┤
+          │ AWS_ACCESS_KEY_ID            │ Real IAM for Terraform/EC2  │
+          │ AWS_SECRET_ACCESS_KEY        │ (NOT Canary keys)           │
+          │ SSH_PRIVATE_KEY              │ Admin SSH private key        │
+          │ SSH_PUBLIC_KEY               │ Matching OpenSSH public key│
+          │ OPENROUTER_API_KEY           │ LLM tarpit (OpenRouter)     │
+          │ TELEGRAM_BOT_TOKEN           │ From @BotFather             │
+          │ TELEGRAM_CHAT_ID            │ Destination chat/channel id │
+          │ CANARY_AWS_ACCESS_KEY_ID     │ Thinkst Canarytoken AKIA…   │
+          │ CANARY_AWS_SECRET_ACCESS_KEY│ Matching Canary secret      │
+          └──────────────────────────────┴────────────────────────────┘
+
+          How to get each:
+            1. AWS deploy keys — IAM user with EC2/VPC rights in your account
+            2. SSH keypair — ssh-keygen -t ed25519 -f watchpost -N ""
+                 SSH_PRIVATE_KEY = contents of watchpost
+                 SSH_PUBLIC_KEY  = contents of watchpost.pub
+            3. OpenRouter — https://openrouter.ai/keys
+            4. Telegram — @BotFather → /newbot, then message the bot;
+                 chat id via https://api.telegram.org/bot<token>/getUpdates
+            5. Canary — https://canarytokens.org/generate → AWS keys token
+                 After deploy, set webhook to http://<public-ip>:8080/hook/canary
+
+          Then re-run this workflow with confirm_prerequisites = true.
+          EOF
+          exit 1
+
+      - name: Validate secrets are present
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CANARY_AWS_ACCESS_KEY_ID: ${{ secrets.CANARY_AWS_ACCESS_KEY_ID }}
+          CANARY_AWS_SECRET_ACCESS_KEY: ${{ secrets.CANARY_AWS_SECRET_ACCESS_KEY }}
+          CANARY_AWS_REGION: ${{ inputs.canary_aws_region }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          INSTANCE_TYPE: ${{ inputs.instance_type }}
+          LLM_MODEL: ${{ inputs.llm_model }}
+          ADMIN_CIDR: ${{ inputs.admin_cidr }}
+        run: |
+          chmod +x scripts/check_prereqs.sh
+          ./scripts/check_prereqs.sh
+
+  deploy:
+    name: Terraform + bootstrap
+    needs: prerequisites
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+      TF_IN_AUTOMATION: "true"
+    outputs:
+      public_ip: ${{ steps.tf_out.outputs.public_ip }}
+      decoy_api: ${{ steps.tf_out.outputs.decoy_api }}
+      canary_webhook: ${{ steps.tf_out.outputs.canary_webhook }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Write SSH keys
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/watchpost
+          printf '%s\n' "$SSH_PUBLIC_KEY" > ~/.ssh/watchpost.pub
+          # Normalize Windows-style newlines if pasted from UI
+          sed -i 's/\r$//' ~/.ssh/watchpost ~/.ssh/watchpost.pub
+          chmod 600 ~/.ssh/watchpost
+          ssh-keygen -y -f ~/.ssh/watchpost >/dev/null
+          echo "SSH keypair OK"
+
+      - name: Terraform init
+        working-directory: iaac
+        run: terraform init -input=false
+
+      - name: Write Terraform tfvars
+        working-directory: iaac
+        env:
+          AWS_REGION_INPUT: ${{ inputs.aws_region }}
+          INSTANCE_TYPE_INPUT: ${{ inputs.instance_type }}
+          PROJECT_NAME_INPUT: ${{ inputs.project_name }}
+          ADMIN_CIDR_INPUT: ${{ inputs.admin_cidr }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          def tfstr(s: str) -> str:
+              return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+          body = "\n".join([
+              f"aws_region     = {tfstr(os.environ['AWS_REGION_INPUT'])}",
+              f"instance_type  = {tfstr(os.environ['INSTANCE_TYPE_INPUT'])}",
+              f"project_name   = {tfstr(os.environ['PROJECT_NAME_INPUT'])}",
+              f"admin_cidr     = {tfstr(os.environ['ADMIN_CIDR_INPUT'])}",
+              f"ssh_public_key = {tfstr(os.environ['SSH_PUBLIC_KEY'].strip())}",
+              "",
+          ])
+          Path("ci.auto.tfvars").write_text(body, encoding="utf-8")
+          print("wrote ci.auto.tfvars")
+          PY
+
+      - name: Terraform apply
+        working-directory: iaac
+        run: terraform apply -input=false -auto-approve
+
+      - name: Capture outputs
+        id: tf_out
+        working-directory: iaac
+        run: |
+          PUBLIC_IP="$(terraform output -raw public_ip)"
+          echo "public_ip=${PUBLIC_IP}" >> "$GITHUB_OUTPUT"
+          echo "decoy_api=$(terraform output -raw decoy_api)" >> "$GITHUB_OUTPUT"
+          echo "canary_webhook=$(terraform output -raw canary_webhook)" >> "$GITHUB_OUTPUT"
+          echo "Public IP: ${PUBLIC_IP}"
+
+      - name: Persist Terraform state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watchpost-terraform-state
+          path: |
+            iaac/terraform.tfstate
+            iaac/terraform.tfstate.backup
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Bootstrap Watchpost on the node
+        if: ${{ inputs.skip_bootstrap != true }}
+        env:
+          PUBLIC_IP: ${{ steps.tf_out.outputs.public_ip }}
+          SSH_KEY_FILE: ${{ runner.temp }}/watchpost.key
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CANARY_AWS_ACCESS_KEY_ID: ${{ secrets.CANARY_AWS_ACCESS_KEY_ID }}
+          CANARY_AWS_SECRET_ACCESS_KEY: ${{ secrets.CANARY_AWS_SECRET_ACCESS_KEY }}
+          CANARY_AWS_REGION: ${{ inputs.canary_aws_region }}
+          LLM_MODEL: ${{ inputs.llm_model }}
+        run: |
+          cp ~/.ssh/watchpost "$SSH_KEY_FILE"
+          chmod 600 "$SSH_KEY_FILE"
+          chmod +x scripts/bootstrap_node.sh
+          ./scripts/bootstrap_node.sh
+
+      - name: Deployment summary
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Watchpost deployed
+
+          | Item | Value |
+          |---|---|
+          | Decoy API | http://${{ steps.tf_out.outputs.public_ip }} |
+          | Canary webhook | http://${{ steps.tf_out.outputs.public_ip }}:8080/hook/canary |
+          | Admin SSH | \`ssh -i <private-key> -p 2222 ubuntu@${{ steps.tf_out.outputs.public_ip }}\` |
+          | Region | \`${{ inputs.aws_region }}\` |
+          | Instance | \`${{ inputs.instance_type }}\` |
+
+          ### Still do manually
+          1. Open https://canarytokens.org and set this token's **webhook** to the Canary webhook URL above.
+          2. Put the same Canary keys into your public lure \`.env\` (if not already).
+          3. Send a test message — Telegram should receive scored alerts.
+          4. Demo: \`API=http://${{ steps.tf_out.outputs.public_ip }} ./demo/attack.sh\`
+          EOF

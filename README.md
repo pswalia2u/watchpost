@@ -215,17 +215,15 @@ I did **not** train a custom model. The “AI” is orchestration: a deception r
 
 ---
 
-## Deploy notes (high level)
+## Deploy
 
-1. `terraform apply` in `iaac/` (SSH key, region, instance size as needed).  
-2. Install Docker; clone this repo onto the VM.  
-3. Set `openAISecretKey` in the service YAMLs (placeholder `REPLACE_WITH_OPENROUTER_KEY` in git).  
-4. Create `/home/ubuntu/beelzebub/secrets/telegram.env` with bot token + chat ID.  
-5. `docker compose up -d` in `beelzebub/`.  
-6. Enable systemd units for `canary-webhook` (`receiver.py`) and `tor-gateway` (`tor_gateway.py`).  
-7. Plant Canary keys into `http-80.yaml` / lure and point the Canary webhook at `http://<public-ip>:8080/hook/canary`.
+**GitHub Actions (recommended):** see [DEPLOY.md](DEPLOY.md).
 
-Exact systemd unit files used in the live demo live on the VM; the Python entrypoints in `beelzebub/intel/` are the source of truth for behaviour.
+1. Add required repository secrets (AWS IAM, SSH keypair, OpenRouter, Telegram, Canarytoken AWS keys).
+2. **Actions → Deploy Watchpost → Run workflow** and tick **confirm_prerequisites**.
+3. After apply, set the Canarytoken webhook to `http://<public-ip>:8080/hook/canary`.
+
+Manual path: `terraform apply` in `iaac/`, then `./scripts/bootstrap_node.sh` with the same env vars.
 
 ---
 

@@ -24,10 +24,10 @@ commands:
   - regex: "^(/\\.env|/v1/\\.env|/config/\\.env|/api/\\.env)(\\?.*)?$"
     handler: |
       NODE_ENV=production
-      API_BASE=http://18.171.222.41
-      AWS_ACCESS_KEY_ID=AKIAT3S7HNUN2E2RTNYC
-      AWS_SECRET_ACCESS_KEY=NFWfz/m0cZUhnJLG5lFnrH5rFv5TAX8bFY8MPAvb
-      AWS_DEFAULT_REGION=us-east-2
+      API_BASE=http://REPLACE_WITH_PUBLIC_IP
+      AWS_ACCESS_KEY_ID=REPLACE_WITH_CANARY_AWS_ACCESS_KEY_ID
+      AWS_SECRET_ACCESS_KEY=REPLACE_WITH_CANARY_AWS_SECRET_ACCESS_KEY
+      AWS_DEFAULT_REGION=REPLACE_WITH_CANARY_AWS_REGION
       HLP_DB_URL=postgres://hlp_admin:AidOps-2024!@db.hlp-ops.internal:5432/logistics
       GITHUB_TOKEN=ghp_hlpLogisticsCiDemoNotReal0001
       SLACK_BOT_TOKEN=xoxb-hlp-ops-demo-notreal
@@ -39,7 +39,7 @@ commands:
     statusCode: 200
   - regex: "^(/v1/openapi\\.json|/openapi\\.json)(\\?.*)?$"
     handler: |
-      {"openapi":"3.0.3","info":{"title":"HLP Humanitarian Logistics API","version":"2.4.1","description":"Internal control plane for aid shipment routing, warehouse stock, and CI/CD promotion."},"servers":[{"url":"http://18.171.222.41"}],"paths":{"/v1/shipments":{"get":{"summary":"List shipments"}},"/v1/ci/pipelines":{"get":{"summary":"List deploy pipelines"}},"/v1/ci/secrets":{"get":{"summary":"Fetch runtime secrets (admin)"}}}}
+      {"openapi":"3.0.3","info":{"title":"HLP Humanitarian Logistics API","version":"2.4.1","description":"Internal control plane for aid shipment routing, warehouse stock, and CI/CD promotion."},"servers":[{"url":"http://REPLACE_WITH_PUBLIC_IP"}],"paths":{"/v1/shipments":{"get":{"summary":"List shipments"}},"/v1/ci/pipelines":{"get":{"summary":"List deploy pipelines"}},"/v1/ci/secrets":{"get":{"summary":"Fetch runtime secrets (admin)"}}}}
     headers:
       - "Content-Type: application/json"
       - "Server: nginx/1.24.0"
@@ -62,7 +62,7 @@ commands:
     statusCode: 200
   - regex: "^/v1/ci/secrets(\\?.*)?$"
     handler: |
-      {"ok":true,"store":"ssm://hlp/prod/ci","secrets":[{"name":"AWS_ACCESS_KEY_ID","value":"AKIAT3S7HNUN2E2RTNYC"},{"name":"AWS_SECRET_ACCESS_KEY","value":"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"},{"name":"AWS_DEFAULT_REGION","value":"us-east-2"},{"name":"REGISTRY_TOKEN","value":"ghp_hlpLogisticsCiDemoNotReal0001"},{"name":"PROD_KUBECONFIG_B64","value":"YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6IFtdIGhscC1kZW1v"}]}
+      {"ok":true,"store":"ssm://hlp/prod/ci","secrets":[{"name":"AWS_ACCESS_KEY_ID","value":"REPLACE_WITH_CANARY_AWS_ACCESS_KEY_ID"},{"name":"AWS_SECRET_ACCESS_KEY","value":"REPLACE_WITH_CANARY_AWS_SECRET_ACCESS_KEY"},{"name":"AWS_DEFAULT_REGION","value":"REPLACE_WITH_CANARY_AWS_REGION"},{"name":"REGISTRY_TOKEN","value":"ghp_hlpLogisticsCiDemoNotReal0001"},{"name":"PROD_KUBECONFIG_B64","value":"YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6IFtdIGhscC1kZW1v"}]}
     headers:
       - "Content-Type: application/json"
       - "Server: nginx/1.24.0"

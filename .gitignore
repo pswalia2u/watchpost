@@ -3,6 +3,8 @@ iaac/.terraform/
 iaac/terraform.tfstate
 iaac/terraform.tfstate.backup
 iaac/*.tfvars
+iaac/*.auto.tfvars
+!iaac/terraform.tfvars.example
 
 # Secrets / runtime
 **/secrets/

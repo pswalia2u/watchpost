@@ -222,6 +222,7 @@ I did **not** train a custom model. The “AI” is orchestration: a deception r
 1. Add required repository secrets (AWS IAM, SSH keypair, OpenRouter, Telegram, Canarytoken AWS keys).
 2. **Actions → Deploy Watchpost → Run workflow** and tick **confirm_prerequisites**.
 3. After apply, set the Canarytoken webhook to `http://<public-ip>:8080/hook/canary`.
+4. Tear down later with **Actions → Destroy Watchpost** (tick **confirm_destroy**; reuses the Terraform state artifact).
 
 Manual path: `terraform apply` in `iaac/`, then `./scripts/bootstrap_node.sh` with the same env vars.
 

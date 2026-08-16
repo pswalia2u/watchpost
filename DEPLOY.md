@@ -73,6 +73,17 @@ export CANARY_AWS_SECRET_ACCESS_KEY=...
 ./scripts/bootstrap_node.sh
 ```
 
+## 4. Destroy
+
+**Actions → Destroy Watchpost → Run workflow**
+
+1. Tick **confirm_destroy** (required).
+2. Use the **same** `aws_region` / `project_name` / `instance_type` / `admin_cidr` as deploy.
+3. Leave `deploy_run_id` empty to use the latest successful Deploy artifact, or paste a specific run id.
+4. Required secrets for destroy only: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SSH_PUBLIC_KEY`.
+
+The workflow downloads the `watchpost-terraform-state` artifact from Deploy, then runs `terraform destroy`.
+
 ## Safety
 
 - Canary keys are **tripwires**, not operator IAM.

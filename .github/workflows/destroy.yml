@@ -1,0 +1,202 @@
+name: Destroy Watchpost
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: "I understand this will DESTROY the Watchpost EC2/VPC/SG and cannot be undone"
+        required: true
+        type: boolean
+        default: false
+      aws_region:
+        description: "AWS region used at deploy time"
+        required: true
+        type: string
+        default: "eu-west-2"
+      instance_type:
+        description: "Instance type used at deploy time (must match state)"
+        required: true
+        type: string
+        default: "m7i-flex.large"
+      project_name:
+        description: "Project name prefix used at deploy time"
+        required: true
+        type: string
+        default: "watchpost"
+      admin_cidr:
+        description: "Admin CIDR used at deploy time"
+        required: true
+        type: string
+        default: "0.0.0.0/0"
+      deploy_run_id:
+        description: "Optional: GitHub Actions run id of the Deploy Watchpost run whose terraform state artifact to use (leave empty = latest successful)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: watchpost-deploy
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Terraform destroy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+      TF_IN_AUTOMATION: "true"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Confirm destroy
+        if: ${{ inputs.confirm_destroy != true }}
+        run: |
+          cat <<'EOF'
+          ERROR: Tick confirm_destroy to proceed.
+
+          This workflow will permanently destroy Watchpost AWS resources
+          (EC2, VPC, subnet, IGW, security group, key pair) using the
+          terraform.tfstate artifact from a previous Deploy Watchpost run.
+
+          Required secrets (same as deploy):
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+            SSH_PUBLIC_KEY
+          EOF
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate destroy secrets
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          missing=()
+          [[ -n "${AWS_ACCESS_KEY_ID:-}" ]] || missing+=("AWS_ACCESS_KEY_ID")
+          [[ -n "${AWS_SECRET_ACCESS_KEY:-}" ]] || missing+=("AWS_SECRET_ACCESS_KEY")
+          [[ -n "${SSH_PUBLIC_KEY:-}" ]] || missing+=("SSH_PUBLIC_KEY")
+          if ((${#missing[@]} > 0)); then
+            echo "ERROR: missing secrets:"
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+          echo "Destroy secrets present."
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Download terraform state artifact
+        env:
+          DEPLOY_RUN_ID: ${{ inputs.deploy_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p iaac
+          if [[ -n "${DEPLOY_RUN_ID}" ]]; then
+            echo "Using deploy run id: ${DEPLOY_RUN_ID}"
+            RUN_ID="${DEPLOY_RUN_ID}"
+          else
+            RUN_ID="$(gh run list \
+              --repo "${{ github.repository }}" \
+              --workflow "deploy.yml" \
+              --branch "${{ github.ref_name }}" \
+              --status success \
+              --limit 20 \
+              --json databaseId,conclusion,displayTitle,createdAt \
+              --jq '.[0].databaseId // empty')"
+            if [[ -z "${RUN_ID}" ]]; then
+              # fallback: any branch
+              RUN_ID="$(gh run list \
+                --repo "${{ github.repository }}" \
+                --workflow "deploy.yml" \
+                --status success \
+                --limit 20 \
+                --json databaseId \
+                --jq '.[0].databaseId // empty')"
+            fi
+          fi
+          if [[ -z "${RUN_ID}" ]]; then
+            echo "ERROR: no successful Deploy Watchpost run found with artifact."
+            echo "Run Deploy first, or pass deploy_run_id explicitly."
+            exit 1
+          fi
+          echo "Downloading watchpost-terraform-state from run ${RUN_ID}"
+          gh run download "${RUN_ID}" \
+            --repo "${{ github.repository }}" \
+            --name watchpost-terraform-state \
+            --dir iaac
+          test -f iaac/terraform.tfstate
+          echo "State loaded:"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          st = json.loads(Path("iaac/terraform.tfstate").read_text())
+          print("terraform version:", st.get("terraform_version"))
+          print("serial:", st.get("serial"))
+          resources = []
+          for m in st.get("resources", []):
+              resources.append(f"{m.get('type')}.{m.get('name')}")
+          print("resources:", ", ".join(resources) or "(none)")
+          # try public IP from outputs
+          outs = st.get("outputs") or {}
+          if "public_ip" in outs:
+              print("public_ip:", outs["public_ip"].get("value"))
+          PY
+
+      - name: Write Terraform tfvars
+        working-directory: iaac
+        env:
+          AWS_REGION_INPUT: ${{ inputs.aws_region }}
+          INSTANCE_TYPE_INPUT: ${{ inputs.instance_type }}
+          PROJECT_NAME_INPUT: ${{ inputs.project_name }}
+          ADMIN_CIDR_INPUT: ${{ inputs.admin_cidr }}
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          def tfstr(s: str) -> str:
+              return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+          body = "\n".join([
+              f"aws_region     = {tfstr(os.environ['AWS_REGION_INPUT'])}",
+              f"instance_type  = {tfstr(os.environ['INSTANCE_TYPE_INPUT'])}",
+              f"project_name   = {tfstr(os.environ['PROJECT_NAME_INPUT'])}",
+              f"admin_cidr     = {tfstr(os.environ['ADMIN_CIDR_INPUT'])}",
+              f"ssh_public_key = {tfstr(os.environ['SSH_PUBLIC_KEY'].strip())}",
+              "",
+          ])
+          Path("ci.auto.tfvars").write_text(body, encoding="utf-8")
+          print("wrote ci.auto.tfvars")
+          PY
+
+      - name: Terraform init
+        working-directory: iaac
+        run: terraform init -input=false
+
+      - name: Terraform destroy
+        working-directory: iaac
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Summary
+        if: always()
+        run: |
+          cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          ## Watchpost destroy
+
+          - Region: \`${{ inputs.aws_region }}\`
+          - Project: \`${{ inputs.project_name }}\`
+          - confirm_destroy: \`${{ inputs.confirm_destroy }}\`
+
+          If destroy succeeded, the EC2 node, VPC, and related AWS resources from the
+          downloaded Terraform state are gone. Rotate or revoke unused OpenRouter /
+          Telegram credentials if you no longer need them.
+          EOF
